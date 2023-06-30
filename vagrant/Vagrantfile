@@ -1,9 +1,56 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
-MASTERS = 1
-WORKERS = 2
+require 'yaml'
+NODE_CONFIG = YAML.load_file('hosts-settings.yml')
 
+IMAGE = NODE_CONFIG["image"]
+IP_RANGE = NODE_CONFIG["ip_range"]
+K3S_VERSION = NODE_CONFIG["version"]
+MASTER_COUNT = NODE_CONFIG["masters"]["count"]
+NODE_COUNT = NODE_CONFIG["workers"]["count"]
+
+sshKey="#{Dir.home}/.ssh/id_rsa.pub"
 
 Vagrant.configure("2") do |config|
+    # Configuration of master nodes 
+    (1..MASTER_COUNT).each do |i|
+        config.vm.define "master-#{i}" do |master|
+            node_ip = "#{IP_RANGE}#{10+i}"
+            master.vm.box = IMAGE
+            master.vm.hostname = "master-#{i}"
+            master.vm.network :private_network, ip: node_ip
+            master.vm.provider :virtualbox do |vb|
+                vb.customize ["modifyvm", :id, "--memory", NODE_CONFIG["masters"]["resources"]["memory"]]
+                vb.customize ["modifyvm", :id, "--cpus", NODE_CONFIG["masters"]["resources"]["cpu"]]
+                vb.name = "master-#{i}"
+            end
+            config.vm.provision "shell" do |s|
+                ssh_pub_key = File.readlines("#{sshKey}").first.strip
+                s.inline = <<-SHELL
+                  echo #{ssh_pub_key} >> /home/vagrant/.ssh/authorized_keys
+                  mkdir /root/.ssh && chmod 700 /root/.ssh
+                  touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys
+                  echo #{ssh_pub_key} >> /root/.ssh/authorized_keys
+                SHELL
+              end
+              config.vm.provision "shell" do |s|
+                s.inline = "ifup eth1"
+              end
+        end  
+    end
 
+    (1..NODE_COUNT).each do |i|
+        config.vm.define "node-#{i}" do |worker|
+            node_ip = "#{IP_RANGE}#{20+i}"
+            worker.vm.box = IMAGE
+            worker.vm.hostname = "worker-#{i}"
+            worker.vm.network :private_network, ip: node_ip
+            worker.vm.provider :virtualbox do |vb|
+                vb.customize ["modifyvm", :id, "--memory", NODE_CONFIG["workers"]["resources"]["memory"]]
+                vb.customize ["modifyvm", :id, "--cpus", NODE_CONFIG["workers"]["resources"]["cpu"]]
+                vb.name = "worker-#{i}"
+            end
+                     
+        end
+    end
 end
